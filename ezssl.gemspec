@@ -7,5 +7,9 @@ Gem::Specification.new do |s|
   s.authors     = ["Lucas Reinheart"]
   s.email       = 'zachtonap@gmail.com'
   s.files       = ["lib/ezssl.rb"]
-  s.metadata    = { "source_code_uri" => "https://github.com/lonelylittlelucas/ezssl" }
+  s.homepage    = 'https://rubygems.org/gems/EzSSL'
+  s.metadata    = {
+    "source_code_uri" => "https://github.com/lonelylittlelucas/ezssl",
+    "documentation_uri" =>  'https://www.rubydoc.info/gems/EzSSL/'
+  }
 end
