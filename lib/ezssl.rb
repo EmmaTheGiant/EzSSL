@@ -35,6 +35,7 @@ module EzSSL
     def decrypt(msg)
       return @pair.private_decrypt(msg)
     end
+    
   end
 
   class Client
@@ -89,12 +90,13 @@ module EzSSL
   # The object that allows communication from Server to Client.
   class Handle
 
+    attr_reader :send
     def initialize(client,key,server)
       # The represented client
       @client=client
       # The public key of the represented client
       @key=OpenSSL::PKey::RSA.new(key)
-      @read=@key.public_encrypt('test lol').length
+      @send=@key.public_encrypt('test lol').length
       @server=server
     end
 
