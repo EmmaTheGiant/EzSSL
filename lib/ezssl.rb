@@ -3,13 +3,15 @@ require 'socket'
 module EzSSL
 
   class Server
+    
+    attr_reader :read, :length
 
-    attr_reader :read
     def initialize(ip,port,length=2048)
-      @socket=TCPServer.open(ip,port)
-      @pair=OpenSSL::PKey::RSA.new(length)
+      @length=length # bit length of private key [readable]
+      @socket=TCPServer.open(ip,port) # the server
+      @pair=OpenSSL::PKey::RSA.new(length) # the server keypair
       @pubkey=@pair.public_key
-      @read=@pubkey.public_encrypt('hello').length
+      @read=@pubkey.public_encrypt('hello').length # byte length to be read by the Handle object
     end
 
     # Accepts a client connection, and returns a Handle object for communication
@@ -40,13 +42,16 @@ module EzSSL
 
   class Client
 
-    attr_reader :key, :pubkey
+    attr_reader :key, :pubkey, :length, :max
 
     def initialize(ip,port,length=2048)
+      @length=length # bit length of private key
       @pair=OpenSSL::PKey::RSA.new(length)
-      @pubkey=@pair.public_key
+      @pubkey=@pair.public_key # clients public key
       @socket=TCPSocket.new(ip,port)
       @read=@pubkey.public_encrypt('hello').length
+
+      # recieve the key frome the server
       go=true
       key=''
       while go
@@ -54,16 +59,13 @@ module EzSSL
         key+=msg
         go=false if msg=="-----END PUBLIC KEY-----\n"
       end
-      @socket.puts @pubkey.to_s
-      @key=OpenSSL::PKey::RSA.new(key)
-    end
 
-    # Returns the maximum length of string that can be encypted with a given key
-    # 
-    # @param [Object] The OpenSSL object to test
-    # @return [Integer] The maximum length of string that can be encrypted with the given key
-    def max_len(key)
-      return key.public_encrypt('test').length
+      #give server public key
+      @socket.puts @pubkey.to_s
+      @key=OpenSSL::PKey::RSA.new(key) # the servers public key
+      
+      @max=((self.gets().to_i)/8).floor - 11
+      self.puts @length.to_s
     end
 
     # Sends a string (msg) to the server
@@ -71,9 +73,8 @@ module EzSSL
     # @param msg [String] The sting being sent to the server
     # @raise [ArgumentError] if the message being sent is too large for the OpenSSL::PKey::RSA object
     def puts(msg)
-      raise ArgumentError, "Message is too large to encrypt with the current key. (Max Length:#{max_len(@key)})" if msg.length > max_len(@key)
+      raise ArgumentError, 'Message too big' if msg.length>@max
       @socket.write @key.public_encrypt(msg)
-      return nil
     end
 
     # Recieves a string from the server
@@ -89,15 +90,18 @@ module EzSSL
 
   # The object that allows communication from Server to Client.
   class Handle
+    attr_reader :max
+    # the client already has the servers pubkey, and the server has the clients pubkey
 
-    attr_reader :send
     def initialize(client,key,server)
       # The represented client
       @client=client
       # The public key of the represented client
       @key=OpenSSL::PKey::RSA.new(key)
-      @send=@key.public_encrypt('test lol').length
       @server=server
+      @max=256
+      self.puts @server.length.to_s
+      @max=@max=((self.gets().to_i)/8).floor - 11
     end
 
     # Sends a string (msg) to the represented client
@@ -105,17 +109,8 @@ module EzSSL
     # @param msg [String] The message being sent to the client
     # @raise [ArgumentError] if the message being sent is too large for the OpenSSL::PKey::RSA object
     def puts(msg)
-      raise ArgumentError, "Message is too large to encrypt with the current key. (Max Length:#{max_len(@key)})" if msg.length > max_len(@key)
+      raise ArgumentError, 'Message too big' if msg.length>@max
       @client.write @key.public_encrypt(msg)
-      return nil
-    end
-
-    # Returns the maximum length of string that can be encypted with a given key
-    # 
-    # @param [Object] The OpenSSL object to test
-    # @return [Integer] The maximum length of string that can be encrypted with the given key
-    def max_len(key)
-      return key.public_encrypt('test').length
     end
 
     # Recieves a string from the client
@@ -132,4 +127,5 @@ module EzSSL
     end
 
   end
+
 end
