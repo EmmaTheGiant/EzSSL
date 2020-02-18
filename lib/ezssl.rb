@@ -1,131 +1,104 @@
 require 'openssl'
 require 'socket'
 module EzSSL
-
   class Server
-    
-    attr_reader :read, :length
-
-    def initialize(ip,port,length=2048)
-      @length=length # bit length of private key [readable]
-      @socket=TCPServer.open(ip,port) # the server
-      @pair=OpenSSL::PKey::RSA.new(length) # the server keypair
-      @pubkey=@pair.public_key
-      @read=@pubkey.public_encrypt('hello').length # byte length to be read by the Handle object
+    attr_reader :pubkey
+    @@rsa=OpenSSL::PKey::RSA.new(2048)
+    def initialize(ip,port)
+      @server=TCPServer.new(ip,port)
     end
-
-    # Accepts a client connection, and returns a Handle object for communication
-    # 
-    # @return [Object] The Handle object
     def accept()
-      client=@socket.accept
-      client.puts @pubkey.to_s
-      go=true
-      key=''
-      while go
-        msg=client.gets
-        key+=msg
-        go=false if msg=="-----END PUBLIC KEY-----\n"
-      end
-      return Handle.new(client,key,self)
+      client=@server.accept
+      return Handle.new(client,self)
     end
-
-    # Decrypt a message without direct access to the private key
-    # 
-    # @param msg [String] The encrypted message
-    # @return [String] The decrypted message
-    def decrypt(msg)
-      return @pair.private_decrypt(msg)
+    def rsa_decrypt(msg)
+      return @@rsa.private_decrypt(msg)
+    end
+    def pubkey
+      return @@rsa.public_key.to_s
+    end
+  end
+  
+  class Client
+    def initialize(ip,port)
+      @socket=TCPSocket.new(ip,port)
+      @rsa=OpenSSL::PKey::RSA.new(2048)
+      @cip=OpenSSL::Cipher::AES256.new(:CBC).encrypt()
+      @dec=OpenSSL::Cipher::AES256.new(:CBC).decrypt()
+      #server=>client
+      key=''
+      line=@socket.gets
+      until line=="\n"
+        key+=line
+        line=@socket.gets
+      end
+      @server_rsa=OpenSSL::PKey::RSA.new(key)
+      @socket.puts @rsa.public_key.to_s
+      @socket.puts ""
+    end
+    
+    def puts(msg)
+      key=@cip.random_key()
+      iv=@cip.random_iv()
+      enc=@cip.update(msg)+@cip.final
+      @socket.write(iv)
+      @socket.write(@server_rsa.public_encrypt(key))
+      @socket.puts enc.length
+      @socket.write(enc)
+    end
+    
+    def gets()
+      @dec.iv=@socket.read(16)
+      @dec.key=@rsa.private_decrypt(@socket.read(256))
+      len=@socket.gets.to_i
+      msg=@socket.read(len)
+      return @dec.update(msg)+@dec.final
     end
     
   end
-
-  class Client
-
-    attr_reader :key, :pubkey, :length, :max
-
-    def initialize(ip,port,length=2048)
-      @length=length # bit length of private key
-      @pair=OpenSSL::PKey::RSA.new(length)
-      @pubkey=@pair.public_key # clients public key
-      @socket=TCPSocket.new(ip,port)
-      @read=@pubkey.public_encrypt('hello').length
-
-      # recieve the key frome the server
-      go=true
-      key=''
-      while go
-        msg=@socket.gets
-        key+=msg
-        go=false if msg=="-----END PUBLIC KEY-----\n"
-      end
-
-      #give server public key
-      @socket.puts @pubkey.to_s
-      @key=OpenSSL::PKey::RSA.new(key) # the servers public key
-      
-      @max=((self.gets().to_i)/8).floor - 11
-      self.puts @length.to_s
-    end
-
-    # Sends a string (msg) to the server
-    #
-    # @param msg [String] The sting being sent to the server
-    # @raise [ArgumentError] if the message being sent is too large for the OpenSSL::PKey::RSA object
-    def puts(msg)
-      raise ArgumentError, 'Message too big' if msg.length>@max
-      @socket.write @key.public_encrypt(msg)
-    end
-
-    # Recieves a string from the server
-    # 
-    # @return [String] The message from the server
-    def gets()
-      msg=@socket.read(@read)
-      return @pair.private_decrypt(msg)
-    end
-  end
-
+  
   private
-
-  # The object that allows communication from Server to Client.
   class Handle
-    attr_reader :max
-    # the client already has the servers pubkey, and the server has the clients pubkey
-
-    def initialize(client,key,server)
-      # The represented client
+    def initialize(client,server)
       @client=client
-      # The public key of the represented client
-      @key=OpenSSL::PKey::RSA.new(key)
       @server=server
-      @max=256
-      self.puts @server.length.to_s
-      @max=@max=((self.gets().to_i)/8).floor - 11
+      @cip=OpenSSL::Cipher::AES256.new(:CBC).encrypt()
+      @dec=OpenSSL::Cipher::AES256.new(:CBC).decrypt()
+      #swap rsa keys
+      #server=>client
+      client.puts server.pubkey
+      client.puts ""
+      #client=>server
+      key=''
+      line=client.gets
+      until line=="\n"
+        key+=line
+        line=client.gets
+      end
+      #make rsa key
+      @rsa=OpenSSL::PKey::RSA.new(key)
     end
-
-    # Sends a string (msg) to the represented client
-    #  
-    # @param msg [String] The message being sent to the client
-    # @raise [ArgumentError] if the message being sent is too large for the OpenSSL::PKey::RSA object
+    
     def puts(msg)
-      raise ArgumentError, 'Message too big' if msg.length>@max
-      @client.write @key.public_encrypt(msg)
+      key=@cip.random_key()
+      iv=@cip.random_iv()
+      enc=@cip.update(msg)+@cip.final
+      @client.write(iv)
+      @client.write(@rsa.public_encrypt(key))
+      @client.puts enc.length
+      @client.write(enc)
     end
-
-    # Recieves a string from the client
-    # 
-    # @return [String] The message sent from the client
+    
     def gets()
-      msg=@client.read(@server.read)
-      return @server.decrypt(msg)
+      @dec.iv=@client.read(16)
+      @dec.key=@server.rsa_decrypt(@client.read(256))
+      len=@client.gets.to_i
+      msg=@client.read(len)
+      return @dec.update(msg)+@dec.final
     end
-
-    # Closes the client remotely
-    def close
-      @client.close
+    
+    def close()
+      @client.close()
     end
-
   end
-
 end
