@@ -2,7 +2,6 @@ require 'openssl'
 require 'socket'
 module EzSSL
   class Server
-    attr_reader :pubkey
     @@rsa=OpenSSL::PKey::RSA.new(2048)
     def initialize(ip,port)
       @server=TCPServer.new(ip,port)
