@@ -19,6 +19,7 @@ module EzSSL
   end
   
   class Client
+    attr_reader :socket
     def initialize(ip,port)
       @socket=TCPSocket.new(ip,port)
       @rsa=OpenSSL::PKey::RSA.new(2048)
@@ -58,6 +59,7 @@ module EzSSL
   
   private
   class Handle
+    attr_reader :client
     def initialize(client,server)
       @client=client
       @server=server
